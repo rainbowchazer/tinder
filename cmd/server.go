@@ -20,6 +20,7 @@ func main() {
 	r.HandleFunc("/profile/delete", handlers.DeleteProfile).Methods("DELETE")
 	r.HandleFunc("/matches", handlers.GetPotentialMatches).Methods("GET")
 	r.HandleFunc("/like", handlers.LikeUsers).Methods("POST")
+	r.HandleFunc("/ws", handlers.ChatHandler)
 
 	log.Println("Сервер запущен на :8080")
 	http.ListenAndServe(":8080", r)

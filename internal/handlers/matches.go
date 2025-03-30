@@ -63,7 +63,7 @@ func CheckForMatches(userEmail, likedEmail string) {
 		if err != nil {
 			log.Println("Ошибка при сохранении мэтча:", err)
 		} else {
-			log.Printf("Новый мэтч: %s ❤️  %s", userEmail, likedEmail)
+			log.Printf("Новый мэтч: %s ❤️ %s", userEmail, likedEmail)
 		}
 	}
 }
