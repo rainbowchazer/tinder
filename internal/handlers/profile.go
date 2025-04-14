@@ -11,14 +11,15 @@ import (
 )
 
 type UserProfile struct {
-	Username string         `json:"username"`
-	Email    string         `json:"email"`
-	Age      int            `json:"age"`
-	Photo    sql.NullString `json:"photo"`
+	Username  string         `json:"username"`
+	Email     string         `json:"email"`
+	Age       int            `json:"age"`
+	Photo     sql.NullString `json:"photo"`
+	Interests []string       `json:"interests"`
 }
 
 func GetProfile(w http.ResponseWriter, r *http.Request) {
-	email := r.URL.Query().Get("email")
+	email := r.Context().Value("email").(string)
 	if email == "" {
 		http.Error(w, "Email обязателен", http.StatusBadRequest)
 		return
@@ -27,7 +28,7 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 	var profile UserProfile
 	err := database.DB.QueryRow(context.Background(),
 		"SELECT username, email, age, photo FROM users WHERE email=$1", email).
-		Scan(&profile.Username, &profile.Email, &profile.Age, &profile.Photo)
+		Scan(&profile.Username, &profile.Email, &profile.Age, &profile.Photo, &profile.Interests)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -55,7 +56,7 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	var currentProfile UserProfile
 	err := database.DB.QueryRow(context.Background(),
-		"SELECT username, email, age, photo FROM users WHERE email=$1", email).
+		"SELECT username, email, age, photo, interests FROM users WHERE email=$1", email).
 		Scan(&currentProfile.Username, &currentProfile.Email, &currentProfile.Age, &currentProfile.Photo)
 
 	if err != nil {
@@ -154,4 +155,38 @@ func DeleteProfile(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "Профиль удален")
+}
+
+func UpdateInterest(w http.ResponseWriter, r *http.Request) {
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		http.Error(w, "Email обязателен", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Interests []string `json:"interests"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Неверный формат запроса", http.StatusBadRequest)
+		return
+	}
+
+	_, err := database.DB.Exec(context.Background(),
+		`UPDATE users
+		 SET interests = (
+		   SELECT ARRAY(
+		     SELECT DISTINCT unnest(u.interests || $2)
+		   )
+		 )
+		 FROM users u
+		 WHERE u.email = $1 AND users.email = $1`,
+		email, req.Interests)
+
+	if err != nil {
+		http.Error(w, "Ошибка при обновлении интересов", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "Интересы обновлены"})
 }

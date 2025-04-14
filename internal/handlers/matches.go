@@ -9,7 +9,7 @@ import (
 	"tinder-go/internal/database"
 )
 
-func GetPotentialMatches(w http.ResponseWriter, r *http.Request) {
+func GetPotentialMatchesWithParam(w http.ResponseWriter, r *http.Request) {
 	email := r.URL.Query().Get("email")
 
 	if email == "" {
@@ -17,15 +17,60 @@ func GetPotentialMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := database.DB.Query(context.Background(),
-		`SELECT username, age, photo,email
-		FROM users u
-		LEFT JOIN likes l ON u.email = l.liked_email AND l.user_email = $1
-		WHERE l.liked_email IS NULL AND u.email != $1
-		LIMIT 10`, email)
+	var userGender string
+	err := database.DB.QueryRow(context.Background(), "SELECT gender FROM users WHERE email = $1", email).Scan(&userGender)
+	if err != nil {
+		http.Error(w, "Ошибка получения пола пользователя", http.StatusInternalServerError)
+		log.Printf("Ошибка: %v", err)
+		return
+	}
 
+	var param struct {
+		AgeBeg       int      `json:"ageBeg"`
+		AgeFin       int      `json:"ageFin"`
+		Interests    []string `json:"interests"`
+		PhotoNotNull bool     `json:"photoNotNull"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&param); err != nil {
+		http.Error(w, "Неверный формат запроса", http.StatusBadRequest)
+	}
+
+	query := `
+	SELECT username, age, photo, email
+	FROM users u
+	LEFT JOIN likes l ON u.email = l.liked_email AND l.user_email = $1
+	WHERE l.liked_email IS NULL
+	AND u.email != $1
+	AND u.age BETWEEN $2 AND $3
+	AND u.gender != $4`
+
+	args := []interface{}{email, param.AgeBeg, param.AgeFin, userGender}
+	argIndex := 5
+
+	if len(param.Interests) > 0 {
+		query += " AND ("
+		for i, interest := range param.Interests {
+			if i > 0 {
+				query += " OR "
+			}
+			query += fmt.Sprintf("$%d = ANY(u.interests)", argIndex)
+			args = append(args, interest)
+			argIndex++
+		}
+		query += ")"
+	}
+
+	if param.PhotoNotNull {
+		query += " AND u.photo IS NOT NULL"
+	}
+
+	query += " LIMIT 10"
+
+	rows, err := database.DB.Query(context.Background(), query, args...)
 	if err != nil {
 		http.Error(w, "Ошибка поиска кандидатов", http.StatusInternalServerError)
+		log.Printf("Ошибка выполнения запроса: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -35,12 +80,13 @@ func GetPotentialMatches(w http.ResponseWriter, r *http.Request) {
 		var user UserProfile
 		err := rows.Scan(&user.Username, &user.Age, &user.Photo, &user.Email)
 		if err != nil {
-			log.Println("Ошибка при сканировании строки", err)
+			log.Println("Ошибка при сканировании строки:", err)
 			continue
 		}
 		candidates = append(candidates, user)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(candidates)
 }
 
